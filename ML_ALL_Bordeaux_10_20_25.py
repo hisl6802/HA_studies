@@ -8,6 +8,7 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.linear_model import LogisticRegression
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC,LinearSVC
 import joblib
@@ -53,7 +54,11 @@ X = pd.read_csv("/VOSNE/Fischbein/bhislop/metabolomics/Merged_path_added.csv")#r
 X = X.loc[
     (X["prePost"]=='pre') & (X["Surgery"]=="Aneurysm"),
 ]
+#remove the pre-post column
 X = X.drop("prePost",axis=1)
+#get out the columns that I will be performing scaling on and add the Age column
+X_metabs_scaling_cols = X.iloc[:,8:].columns[1:]
+X_metabs_scaling_cols = ["Age"] +list(X_metabs_scaling_cols)
 
 X_grades = X.loc[
     X["Grades"].isin(["Mild","Mild-to-moderate","Moderate","Moderate-to-severe"]),
@@ -68,8 +73,8 @@ y = X_grades["Grades"] #extract the labels for training the model
 X_grades = X_grades.iloc[:,list(range(1,3))+list(range(6,7))+list(range(4,5))+list(range(8,9))+list(range(9,X_grades.shape[1]))]
 categorical_cols = ["Sex","Syndrome","Location","Size"]
 X_grades[categorical_cols] = X_grades[categorical_cols].astype("category")
-scaler = StandardScaler()
-X_grades["Age"] = scaler.fit_transform(X_grades[["Age"]])
+# scaler = StandardScaler()
+# X_grades["Age"] = scaler.fit_transform(X_grades[["Age"]])
 X_grades = pd.get_dummies(X_grades,columns=categorical_cols,drop_first=True)
 
 #Setting the strategy for the K-folds making sure they are stratified to ensure good fits and that I have an inner and outer CV set.
@@ -79,6 +84,22 @@ outer = StratifiedKFold(n_splits=5, shuffle=True, random_state=2)
 #Label Encoder for the Mild and Moderate grades
 le = LabelEncoder()
 y  = le.fit_transform(y)
+
+# ---------------------------------------------
+# 2.1 Set columns that will be passed through the standard scaler without transformation.
+# ---------------------------------------------
+#
+passthrough_cols = ["Sex_Male","Syndrome_MFS","Syndrome_NS","Location_Ascending","Location_Descending","Location_Root","Size_>5"]
+
+# ---------------------------------------------
+# 2.2 Set up the Column Transformer
+# ---------------------------------------------
+#
+column_transformer = ColumnTransformer([
+ ('scale',StandardScaler(), X_metabs_scaling_cols),
+ ('pass','passthrough',passthrough_cols)
+])
+
 
 # ---------------------------------------------
 # 3. Set up an outcomes Pandas DataFrame from which we can save all the model results.
@@ -93,6 +114,7 @@ outcomes = pd.DataFrame(np.zeros((10,6)),columns=["BA_mean","BA_std","AUC_mean",
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('model', RandomForestClassifier(
     random_state=42,
     class_weight="balanced_subsample",  # good for class imbalance
@@ -126,6 +148,7 @@ outcomes.loc["RFC"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('model', XGBClassifier(
     eval_metric="auc",
     tree_method="hist",
@@ -156,6 +179,7 @@ outcomes.loc["XGB"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('model', LogisticRegression(penalty="elasticnet",solver="saga",class_weight="balanced",max_iter=5000,random_state=42))
 ])
 
@@ -180,6 +204,7 @@ outcomes.loc["LGR"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('model', SVC(probability=True))
 ])
 
@@ -204,6 +229,7 @@ outcomes.loc["SVC"] = [scores['test_ba'].mean(),
 # ---------------------------------------------
 #
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('pca',PCA(random_state=42)),
     ('model', RandomForestClassifier(
     random_state=42,
@@ -236,6 +262,7 @@ outcomes.loc["RFC_PCA"] = [scores['test_ba'].mean(),
 # ---------------------------------------------
 #
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('umap',umap.UMAP(random_state=42)),
     ('model', RandomForestClassifier(
     random_state=42,
@@ -267,6 +294,7 @@ outcomes.loc["RFC_UMAP"] = [scores['test_ba'].mean(),
 # ---------------------------------------------
 #
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('pca',PCA(random_state=42)),
     ('tsne',TSNE(init="pca", learning_rate="auto", metric='cosine', random_state=42)),
     ('model', RandomForestClassifier(
@@ -302,6 +330,7 @@ outcomes.loc["RFC_tSNE"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('pca',PCA(random_state=42)),
     ('model', XGBClassifier(
     eval_metric="auc",
@@ -333,6 +362,7 @@ outcomes.loc["XGB_PCA"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('umap',umap.UMAP(random_state=42)),
     ('model', XGBClassifier(
     eval_metric="auc",
@@ -364,6 +394,7 @@ outcomes.loc["XGB_UMAP"] = [scores['test_ba'].mean(),
 #
 # --- Pipeline to improve model performance evaluation
 pipe = Pipeline([
+    ('pre', column_transformer),
     ('pca',PCA(random_state=42)),
     ('tsne',TSNE(init="pca", learning_rate="auto", metric='cosine', random_state=42)),
     ('model', XGBClassifier(
@@ -390,3 +421,5 @@ outcomes.loc["XGB_tSNE"] = [scores['test_ba'].mean(),
                        scores['test_auc'].std(),
                        scores['test_mcc'].mean(),
                        scores['test_mcc'].std()]
+
+outcomes.to_csv("/VOSNE/Fischbein/bhislop/metabolomics/model_outcomes.csv",index=False)
