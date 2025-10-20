@@ -10,15 +10,32 @@ import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.svm import SVC,LinearSVC
-import joblib
+from sklearn.svm import SVC, LinearSVC
+import  umap
 from sklearn.decomposition import PCA
-import umap
 from sklearn.manifold import TSNE
 
 
 def nestedCV(pipe,param_dist,cv_inner, cv_outer,X,y):
+    '''
+    Runs NestedCV to ensure that we are getting unbiased estimates of the performance of the models. 
 
+    #----------
+    #Inputs
+    #-----------
+    pipe - pipeline that will be run through GridSearchCV and cross validated
+    param_grid - distribution of parameters that will be considered in the analysis
+    cv_inner - the schema/folds that will be used for internal cross validation
+    cv_outer - the schema/folds that will be used for exernal/outer cross validation
+    X - the predictors
+    y - the outcomes to train against.
+
+    #----------
+    # Outputs
+    #----------
+    scores - this outputs a dataframe with stored scores for Matthew's Correlation Coefficient, Balanced Accuracy Score and AUROC
+
+    '''
     # Randomized search that will run INSIDE each outer fold
     search = GridSearchCV(
         estimator=pipe,                 # your Pipeline
@@ -105,7 +122,10 @@ column_transformer = ColumnTransformer([
 # 3. Set up an outcomes Pandas DataFrame from which we can save all the model results.
 # ---------------------------------------------
 #
-outcomes = pd.DataFrame(np.zeros((10,6)),columns=["BA_mean","BA_std","AUC_mean","AUC_std","MCC_mean","MCC_std"],index=['RFC','XGB','LGR','SVC','RFC_PCA','RFC_UMAP','RFC_tSNE','XGB_PCA','XGB_UMAP','XGB_tSNE'])
+outcomes = pd.DataFrame(np.zeros((16,6)),columns=["BA_mean","BA_std","AUC_mean","AUC_std","MCC_mean","MCC_std"],index=['RFC','XGB','LGR','SVC','RFC_PCA','RFC_UMAP',
+                                                                                                                       'RFC_tSNE','XGB_PCA','XGB_UMAP','XGB_tSNE',
+                                                                                                                       'LGR_PCA','LGR_UMAP','LGR_tSNE',
+                                                                                                                       'SVC_PCA','SVC_UMAP','SVC_tSNE'])
 
 
 # ---------------------------------------------
@@ -407,6 +427,7 @@ pipe = Pipeline([
 # ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
 param_dist = {
     "pca__n_components": np.linspace(1,40,39,dtype=int),
+    "tsne__n_components": np.linspace(1,40,39,dtype=int),
     "tsne__perplexity": np.linspace(1,100,99,dtype=int),
     "model__n_estimators":      np.linspace(200, 1200, 6, dtype=int),
     "model__learning_rate":     np.logspace(np.log10(0.005), np.log10(0.2), 8),
@@ -416,6 +437,173 @@ param_dist = {
 
 scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
 outcomes.loc["XGB_tSNE"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+# ---------------------------------------------
+# 13. Nested Cross Validation of Logistic Regression Classifier with PCA
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('pca',PCA(random_state=42)),
+    ('model', LogisticRegression(penalty="elasticnet",solver="saga",class_weight="balanced",max_iter=5000,random_state=42))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    "pca__n_components": np.linspace(1,40,39,dtype=int),
+    "model__C": np.logspace(-3, 1, 10),        # inverse regularization strength (smaller = stronger)
+    "model__l1_ratio": np.linspace(0, 1, 6)    # 0=L2, 1=L1, values in-between = elastic net
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["LGR_PCA"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+
+# ---------------------------------------------
+# 14. Nested Cross Validation of Logistic Regression Classifier with UMAP
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('umap',umap.UMAP(random_state=42)),
+    ('model', LogisticRegression(penalty="elasticnet",solver="saga",class_weight="balanced",max_iter=5000,random_state=42))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    "umap__n_components": np.linspace(1,40,39,dtype=int),
+    "model__C": np.logspace(-3, 1, 10),        # inverse regularization strength (smaller = stronger)
+    "model__l1_ratio": np.linspace(0, 1, 6)    # 0=L2, 1=L1, values in-between = elastic net
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["LGR_UMAP"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+# ---------------------------------------------
+# 14. Nested Cross Validation of Logistic Regression Classifier with UMAP
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('pca',PCA(random_state=42)),
+    ('tsne',TSNE(init="pca", learning_rate="auto", metric='cosine', random_state=42)),
+    ('model', LogisticRegression(penalty="elasticnet",solver="saga",class_weight="balanced",max_iter=5000,random_state=42))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    "pca__n_components": np.linspace(1,40,39,dtype=int),
+    "tsne__n_components": np.linspace(1,40,39,dtype=int),
+    "tsne__perplexity": np.linspace(1,100,99,dtype=int),
+    "model__C": np.logspace(-3, 1, 10),        # inverse regularization strength (smaller = stronger)
+    "model__l1_ratio": np.linspace(0, 1, 6)    # 0=L2, 1=L1, values in-between = elastic net
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["LGR_tSNE"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+
+# ---------------------------------------------
+# 7. Nested cross validation analysis of Support Vector Classifier
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('pca',PCA(random_state=42)),
+    ('model', SVC(probability=True))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    'pca__n_components': np.linspace(1,40,39,dtype=int),
+    'model__C': np.logspace(-3, 3, 20),
+    'model__gamma': np.logspace(-4, 1, 20),
+    'model__kernel': ['rbf', 'poly', 'sigmoid','linear']
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["SVC_PCA"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+# ---------------------------------------------
+# 7. Nested cross validation analysis of Support Vector Classifier
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('umap',umap.UMAP(random_state=42)),
+    ('model', SVC(probability=True))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    'umap__n_components': np.linspace(1,40,39,dtype=int),
+    'model__C': np.logspace(-3, 3, 20),
+    'model__gamma': np.logspace(-4, 1, 20),
+    'model__kernel': ['rbf', 'poly', 'sigmoid','linear']
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["SVC_UMAP"] = [scores['test_ba'].mean(), 
+                       scores['test_ba'].std(),
+                       scores['test_auc'].mean(),
+                       scores['test_auc'].std(),
+                       scores['test_mcc'].mean(),
+                       scores['test_mcc'].std()]
+
+# ---------------------------------------------
+# 7. Nested cross validation analysis of Support Vector Classifier
+# ---------------------------------------------
+#
+# --- Pipeline to improve model performance evaluation
+pipe = Pipeline([
+    ('pre', column_transformer),
+    ('pca',PCA(random_state=42)),
+    ('tsne',TSNE(init="pca", learning_rate="auto", metric='cosine', random_state=42)),
+    ('model', SVC(probability=True))
+])
+
+# ---- Search space (prefix with 'model__' since RF is under 'model' in the Pipeline)
+param_dist = {
+    "pca__n_components": np.linspace(1,40,39,dtype=int),
+    "tsne__n_components": np.linspace(1,40,39,dtype=int),
+    "tsne__perplexity": np.linspace(1,100,99,dtype=int),
+    'model__C': np.logspace(-3, 3, 20),
+    'model__gamma': np.logspace(-4, 1, 20),
+    'model__kernel': ['rbf', 'poly', 'sigmoid','linear']
+}
+
+scores = nestedCV(pipe,param_dist,inner,outer,X_grades,y)
+outcomes.loc["SVC_UMAP"] = [scores['test_ba'].mean(), 
                        scores['test_ba'].std(),
                        scores['test_auc'].mean(),
                        scores['test_auc'].std(),
